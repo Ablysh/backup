@@ -33,7 +33,12 @@ let db = {
 
 if (fs.existsSync(FILE)) {
   try {
-    db = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    const loaded = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+    db = {
+      backups: loaded.backups || [],
+      allowed: loaded.allowed || [],
+      deleted: loaded.deleted || { channels: 0, categories: 0, roles: 0 }
+    };
   } catch (e) {
     console.log("DB corrupted, resetting...");
   }
