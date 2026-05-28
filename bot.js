@@ -2,7 +2,8 @@ const {
   Client,
   GatewayIntentBits,
   ChannelType,
-  ActivityType
+  ActivityType,
+  EmbedBuilder
 } = require('discord.js');
 
 const fs = require('fs');
@@ -22,7 +23,12 @@ const FILE = './backups.json';
 
 let db = {
   backups: [],
-  allowed: []
+  allowed: [],
+  deleted: {
+    channels: 0,
+    categories: 0,
+    roles: 0
+  }
 };
 
 if (fs.existsSync(FILE)) {
@@ -41,18 +47,33 @@ function isOwner(id) {
   return id === OWNER_ID || db.allowed.includes(id);
 }
 
-// ================= BACKUP =================
-function createBackup(guild) {
+// ================= BACKUP SYSTEM =================
+function createBackup(guild, mode = "all") {
   const data = {
     id: db.backups.length + 1,
     name: guild.name,
-    channels: guild.channels.cache.map(c => ({
+    createdAt: Date.now(),
+    channels: [],
+    roles: []
+  };
+
+  if (mode === "all" || mode === "c") {
+    data.channels = guild.channels.cache.map(c => ({
       name: c.name,
       type: c.type,
       parent: c.parent ? c.parent.name : null
-    })),
-    createdAt: Date.now()
-  };
+    }));
+  }
+
+  if (mode === "all" || mode === "r") {
+    data.roles = guild.roles.cache
+      .filter(r => r.name !== "@everyone")
+      .map(r => ({
+        name: r.name,
+        color: r.color,
+        permissions: r.permissions.bitfield.toString()
+      }));
+  }
 
   db.backups.push(data);
   save();
@@ -60,15 +81,31 @@ function createBackup(guild) {
 }
 
 // ================= RESTORE =================
-async function restore(guild, backup) {
-  for (const ch of backup.channels) {
-    const exists = guild.channels.cache.find(c => c.name === ch.name);
+async function restore(guild, backup, mode = "all") {
 
-    if (!exists) {
-      await guild.channels.create({
-        name: ch.name,
-        type: ch.type
-      }).catch(() => {});
+  if (mode === "all" || mode === "c") {
+    for (const ch of backup.channels || []) {
+      const exists = guild.channels.cache.find(c => c.name === ch.name);
+
+      if (!exists) {
+        await guild.channels.create({
+          name: ch.name,
+          type: ch.type
+        }).catch(() => {});
+      }
+    }
+  }
+
+  if (mode === "all" || mode === "r") {
+    for (const role of backup.roles || []) {
+      const exists = guild.roles.cache.find(r => r.name === role.name);
+
+      if (!exists) {
+        await guild.roles.create({
+          name: role.name,
+          color: role.color
+        }).catch(() => {});
+      }
     }
   }
 }
@@ -77,7 +114,7 @@ async function restore(guild, backup) {
 client.once('ready', () => {
   console.log(`Logged in as ${client.user.tag}`);
 
-  client.user.setActivity("Backup System", {
+  client.user.setActivity("Backup System Pro", {
     type: ActivityType.Watching
   });
 });
@@ -90,109 +127,109 @@ client.on('messageCreate', async (msg) => {
   const args = msg.content.split(' ');
   const cmd = args[0].toLowerCase();
 
-  // ================= BACKUP =================
-  if (cmd === 'backup') {
-    const b = createBackup(msg.guild);
-    return msg.reply(`Backup saved #${b.id}`);
-  }
+// ================= BACKUP =================
+if (cmd === 'backup') {
+  const type = args[1] || "all";
+  const b = createBackup(msg.guild, type);
 
-  // ================= SETUP (latest restore) =================
-  if (cmd === 'setup') {
-    const b = db.backups.at(-1);
-    if (!b) return msg.reply("No backup found");
+  return msg.reply(`Backup #${b.id} saved (${type})`);
+}
 
-    await restore(msg.guild, b);
-    return msg.reply("Latest backup restored");
-  }
+// ================= LOAD =================
+if (cmd === 'load') {
+  const type = args[1] || "all";
+  const b = db.backups.at(-1);
 
-  // ================= RESTORE BY ID =================
-  if (cmd === 'restore') {
-    const id = parseInt(args[1]);
-    const b = db.backups.find(x => x.id === id);
+  if (!b) return msg.reply("No backup found");
 
-    if (!b) return msg.reply("Backup not found");
+  await restore(msg.guild, b, type);
+  return msg.reply(`Loaded backup (${type})`);
+}
 
-    await restore(msg.guild, b);
-    return msg.reply(`Restored backup #${id}`);
-  }
+// ================= SETUP =================
+if (cmd === 'setup') {
+  const b = db.backups.at(-1);
+  if (!b) return msg.reply("No backup found");
 
-  // ================= PREVIEW =================
-  if (cmd === 'preview') {
-    const b = db.backups.at(-1);
-    if (!b) return msg.reply("No backups");
+  await restore(msg.guild, b, "all");
+  return msg.reply("Latest backup restored");
+}
 
-    return msg.reply(
-      `Backup #${b.id}\nChannels: ${b.channels.length}`
-    );
-  }
+// ================= PREVIEW =================
+if (cmd === 'preview') {
+  const b = db.backups.at(-1);
+  if (!b) return msg.reply("No backups");
 
-  // ================= HISTORY =================
-  if (cmd === 'history') {
-    return msg.reply(`Total backups: ${db.backups.length}`);
-  }
+  return msg.reply(
+    `Backup #${b.id}\nChannels: ${b.channels.length}\nRoles: ${b.roles.length}`
+  );
+}
 
-  // ================= COMPARE =================
-  if (cmd === 'compare') {
-    const a = db.backups.find(x => x.id === parseInt(args[1]));
-    const b = db.backups.find(x => x.id === parseInt(args[2]));
+// ================= HISTORY =================
+if (cmd === 'history') {
+  return msg.reply(`Total backups: ${db.backups.length}`);
+}
 
-    if (!a || !b) return msg.reply("Invalid backups");
+// ================= COMPARE =================
+if (cmd === 'compare') {
+  const a = db.backups.find(x => x.id === parseInt(args[1]));
+  const b = db.backups.find(x => x.id === parseInt(args[2]));
 
-    return msg.reply(
-      `A: ${a.channels.length} channels\nB: ${b.channels.length} channels`
-    );
-  }
+  if (!a || !b) return msg.reply("Invalid backups");
 
-  // ================= ADD USER =================
-  if (cmd === 'faddbackup') {
-    const user = msg.mentions.users.first();
-    if (!user) return msg.reply("Mention user");
+  return msg.reply(
+    `A: ${a.channels.length} channels | ${a.roles.length} roles\nB: ${b.channels.length} channels | ${b.roles.length} roles`
+  );
+}
 
-    if (!db.allowed.includes(user.id)) {
-      db.allowed.push(user.id);
-      save();
-    }
+// ================= ADD / REMOVE =================
+if (cmd === 'faddbackup') {
+  const user = msg.mentions.users.first();
+  if (!user) return msg.reply("Mention user");
 
-    return msg.reply("User added");
-  }
+  if (!db.allowed.includes(user.id)) db.allowed.push(user.id);
+  save();
 
-  // ================= REMOVE USER =================
-  if (cmd === 'fremovebackup') {
-    const user = msg.mentions.users.first();
-    if (!user) return msg.reply("Mention user");
+  return msg.reply("User added");
+}
 
-    db.allowed = db.allowed.filter(x => x !== user.id);
-    save();
+if (cmd === 'fremovebackup') {
+  const user = msg.mentions.users.first();
+  if (!user) return msg.reply("Mention user");
 
-    return msg.reply("User removed");
-  }
+  db.allowed = db.allowed.filter(x => x !== user.id);
+  save();
 
-  // ================= LOAD (no delete restore) =================
-  if (cmd === 'load') {
-    const b = db.backups.at(-1);
-    if (!b) return msg.reply("No backup");
+  return msg.reply("User removed");
+}
 
-    await restore(msg.guild, b);
-    return msg.reply("Loaded without deleting existing channels");
-  }
+// ================= KRBACK =================
+if (cmd === 'krback') {
+  db.backups = [];
+  save();
+  return msg.reply("All backups cleared");
+}
 
-  // ================= KRBACK (clear backups) =================
-  if (cmd === 'krback') {
-    db.backups = [];
-    save();
-    return msg.reply("All backups deleted");
-  }
+// ================= STATS (PRO EMBED) =================
+if (cmd === 'stats') {
 
-  // ================= STATS =================
-  if (cmd === 'stats') {
-    const guild = msg.guild;
+  const guild = msg.guild;
 
-    const missing = guild.channels.cache.size;
+  const embed = new EmbedBuilder()
+    .setTitle("BACKUP SYSTEM STATUS")
+    .setColor(0x00ffcc)
+    .addFields(
+      { name: "Owner", value: OWNER_ID, inline: true },
+      { name: "Backups", value: `${db.backups.length}`, inline: true },
+      { name: "Channels", value: `${guild.channels.cache.size}`, inline: true },
+      { name: "Roles", value: `${guild.roles.cache.size}`, inline: true },
+      { name: "Allowed Users", value: `${db.allowed.length}`, inline: true }
+    )
+    .setTimestamp();
 
-    return msg.reply(
-      `Owner: ${OWNER_ID}\nChannels: ${guild.channels.cache.size}\nBackups: ${db.backups.length}`
-    );
-  }
+  return msg.reply({ embeds: [embed] });
+}
+
 });
 
 client.login(process.env.TOKEN);
