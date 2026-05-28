@@ -34,7 +34,9 @@ let db = {
 if (fs.existsSync(FILE)) {
   try {
     db = JSON.parse(fs.readFileSync(FILE, 'utf8'));
-  } catch {}
+  } catch (e) {
+    console.log("DB corrupted, resetting...");
+  }
 }
 
 function save() {
@@ -47,7 +49,7 @@ function isOwner(id) {
   return id === OWNER_ID || db.allowed.includes(id);
 }
 
-// ================= BACKUP SYSTEM =================
+// ================= BACKUP =================
 function createBackup(guild, mode = "all") {
   const data = {
     id: db.backups.length + 1,
@@ -83,29 +85,37 @@ function createBackup(guild, mode = "all") {
 // ================= RESTORE =================
 async function restore(guild, backup, mode = "all") {
 
+  if (!backup) return;
+
+  // CHANNELS
   if (mode === "all" || mode === "c") {
     for (const ch of backup.channels || []) {
-      const exists = guild.channels.cache.find(c => c.name === ch.name);
 
-      if (!exists) {
-        await guild.channels.create({
-          name: ch.name,
-          type: ch.type
-        }).catch(() => {});
-      }
+      if (!ch?.name) continue;
+
+      const exists = guild.channels.cache.find(c => c.name === ch.name);
+      if (exists) continue;
+
+      await guild.channels.create({
+        name: ch.name,
+        type: ch.type ?? ChannelType.GuildText
+      }).catch(() => {});
     }
   }
 
+  // ROLES
   if (mode === "all" || mode === "r") {
     for (const role of backup.roles || []) {
-      const exists = guild.roles.cache.find(r => r.name === role.name);
 
-      if (!exists) {
-        await guild.roles.create({
-          name: role.name,
-          color: role.color
-        }).catch(() => {});
-      }
+      if (!role?.name) continue;
+
+      const exists = guild.roles.cache.find(r => r.name === role.name);
+      if (exists) continue;
+
+      await guild.roles.create({
+        name: role.name,
+        color: role.color || null
+      }).catch(() => {});
     }
   }
 }
@@ -121,114 +131,115 @@ client.once('ready', () => {
 
 // ================= COMMANDS =================
 client.on('messageCreate', async (msg) => {
+
   if (!msg.guild || msg.author.bot) return;
   if (!isOwner(msg.author.id)) return;
 
-  const args = msg.content.split(' ');
+  const args = msg.content.trim().split(/ +/);
   const cmd = args[0].toLowerCase();
 
-// ================= BACKUP =================
-if (cmd === 'backup') {
-  const type = args[1] || "all";
-  const b = createBackup(msg.guild, type);
+  // ================= BACKUP =================
+  if (cmd === 'backup') {
+    const type = args[1] || "all";
+    const b = createBackup(msg.guild, type);
+    return msg.reply(`Backup #${b.id} saved (${type})`);
+  }
 
-  return msg.reply(`Backup #${b.id} saved (${type})`);
-}
+  // ================= LOAD =================
+  if (cmd === 'load') {
+    const type = args[1] || "all";
+    const b = db.backups.at(-1);
 
-// ================= LOAD =================
-if (cmd === 'load') {
-  const type = args[1] || "all";
-  const b = db.backups.at(-1);
+    if (!b) return msg.reply("No backup found");
 
-  if (!b) return msg.reply("No backup found");
+    await restore(msg.guild, b, type);
+    return msg.reply(`Loaded backup (${type})`);
+  }
 
-  await restore(msg.guild, b, type);
-  return msg.reply(`Loaded backup (${type})`);
-}
+  // ================= SETUP =================
+  if (cmd === 'setup') {
+    const b = db.backups.at(-1);
+    if (!b) return msg.reply("No backup found");
 
-// ================= SETUP =================
-if (cmd === 'setup') {
-  const b = db.backups.at(-1);
-  if (!b) return msg.reply("No backup found");
+    await restore(msg.guild, b, "all");
+    return msg.reply("Latest backup restored");
+  }
 
-  await restore(msg.guild, b, "all");
-  return msg.reply("Latest backup restored");
-}
+  // ================= PREVIEW =================
+  if (cmd === 'preview') {
+    const b = db.backups.at(-1);
+    if (!b) return msg.reply("No backups");
 
-// ================= PREVIEW =================
-if (cmd === 'preview') {
-  const b = db.backups.at(-1);
-  if (!b) return msg.reply("No backups");
+    return msg.reply(
+      `Backup #${b.id}\nChannels: ${b.channels.length}\nRoles: ${b.roles.length}`
+    );
+  }
 
-  return msg.reply(
-    `Backup #${b.id}\nChannels: ${b.channels.length}\nRoles: ${b.roles.length}`
-  );
-}
+  // ================= HISTORY =================
+  if (cmd === 'history') {
+    return msg.reply(`Total backups: ${db.backups.length}`);
+  }
 
-// ================= HISTORY =================
-if (cmd === 'history') {
-  return msg.reply(`Total backups: ${db.backups.length}`);
-}
+  // ================= COMPARE =================
+  if (cmd === 'compare') {
+    const a = db.backups.find(x => x.id === parseInt(args[1]));
+    const b = db.backups.find(x => x.id === parseInt(args[2]));
 
-// ================= COMPARE =================
-if (cmd === 'compare') {
-  const a = db.backups.find(x => x.id === parseInt(args[1]));
-  const b = db.backups.find(x => x.id === parseInt(args[2]));
+    if (!a || !b) return msg.reply("Invalid backups");
 
-  if (!a || !b) return msg.reply("Invalid backups");
+    return msg.reply(
+      `A: ${a.channels.length} channels | ${a.roles.length} roles\nB: ${b.channels.length} channels | ${b.roles.length} roles`
+    );
+  }
 
-  return msg.reply(
-    `A: ${a.channels.length} channels | ${a.roles.length} roles\nB: ${b.channels.length} channels | ${b.roles.length} roles`
-  );
-}
+  // ================= ADD =================
+  if (cmd === 'faddbackup') {
+    const user = msg.mentions.users.first();
+    if (!user) return msg.reply("Mention user");
 
-// ================= ADD / REMOVE =================
-if (cmd === 'faddbackup') {
-  const user = msg.mentions.users.first();
-  if (!user) return msg.reply("Mention user");
+    if (!db.allowed.includes(user.id)) db.allowed.push(user.id);
+    save();
 
-  if (!db.allowed.includes(user.id)) db.allowed.push(user.id);
-  save();
+    return msg.reply("User added");
+  }
 
-  return msg.reply("User added");
-}
+  // ================= REMOVE =================
+  if (cmd === 'fremovebackup') {
+    const user = msg.mentions.users.first();
+    if (!user) return msg.reply("Mention user");
 
-if (cmd === 'fremovebackup') {
-  const user = msg.mentions.users.first();
-  if (!user) return msg.reply("Mention user");
+    db.allowed = db.allowed.filter(x => x !== user.id);
+    save();
 
-  db.allowed = db.allowed.filter(x => x !== user.id);
-  save();
+    return msg.reply("User removed");
+  }
 
-  return msg.reply("User removed");
-}
+  // ================= KRBACK =================
+  if (cmd === 'krback') {
+    db.backups = [];
+    save();
+    return msg.reply("All backups cleared");
+  }
 
-// ================= KRBACK =================
-if (cmd === 'krback') {
-  db.backups = [];
-  save();
-  return msg.reply("All backups cleared");
-}
+  // ================= STATS (FIXED + SAFE) =================
+  if (cmd === 'stats') {
 
-// ================= STATS (PRO EMBED) =================
-if (cmd === 'stats') {
+    const guild = msg.guild;
 
-  const guild = msg.guild;
+    const embed = new EmbedBuilder()
+      .setTitle("BACKUP SYSTEM STATUS")
+      .setColor(0x00ffcc)
+      .addFields(
+        { name: "Owner", value: OWNER_ID, inline: true },
+        { name: "Backups", value: String(db.backups.length), inline: true },
+        { name: "Channels", value: String(guild.channels.cache.size), inline: true },
+        { name: "Roles", value: String(guild.roles.cache.size), inline: true },
+        { name: "Allowed Users", value: String(db.allowed.length), inline: true }
+      )
+      .setTimestamp();
 
-  const embed = new EmbedBuilder()
-    .setTitle("BACKUP SYSTEM STATUS")
-    .setColor(0x00ffcc)
-    .addFields(
-      { name: "Owner", value: OWNER_ID, inline: true },
-      { name: "Backups", value: `${db.backups.length}`, inline: true },
-      { name: "Channels", value: `${guild.channels.cache.size}`, inline: true },
-      { name: "Roles", value: `${guild.roles.cache.size}`, inline: true },
-      { name: "Allowed Users", value: `${db.allowed.length}`, inline: true }
-    )
-    .setTimestamp();
-
-  return msg.reply({ embeds: [embed] });
-}
+    return msg.reply({ embeds: [embed] });
+  }
 
 });
 
