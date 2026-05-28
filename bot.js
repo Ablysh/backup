@@ -41,7 +41,7 @@ function save() {
 
 // ================= CONFIG =================
 const OWNER_ID = process.env.OWNER_ID;
-const TOKEN = process.env.TOKEN;
+
 
 function isOwner(id) {
   return id === OWNER_ID || db.allowed.includes(id);
@@ -301,5 +301,4 @@ if (!TOKEN) {
   console.log("TOKEN NOT FOUND IN RAILWAY VARIABLES");
   process.exit(1);
 }
-
 const TOKEN = process.env.TOKEN;
