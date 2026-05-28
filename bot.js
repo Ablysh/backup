@@ -7,7 +7,7 @@ const {
 
 const fs = require('fs');
 
-console.log("Premium Backup Bot Running...");
+console.log("Backup System Running...");
 
 const client = new Client({
   intents: [
@@ -20,73 +20,42 @@ const client = new Client({
 
 const FILE = './backups.json';
 
-let errorCount = 0;
-let totalBackupsCount = 0;
-let backupInterval = null;
+let db = {
+  backups: [],
+  allowed: []
+};
 
-// ================= FILE & DATABASE =================
-function loadData() {
-  if (!fs.existsSync(FILE)) {
-    return {
-      backups: [],
-      deleted: {
-        channels: [],
-        categories: []
-      }
-    };
-  }
-
+if (fs.existsSync(FILE)) {
   try {
-    return JSON.parse(fs.readFileSync(FILE, 'utf8'));
-  } catch (err) {
-    errorCount++;
-    return {
-      backups: [],
-      deleted: {
-        channels: [],
-        categories: []
-      }
-    };
-  }
+    db = JSON.parse(fs.readFileSync(FILE, 'utf8'));
+  } catch {}
 }
-
-let db = loadData();
 
 function save() {
-  try {
-    fs.writeFileSync(FILE, JSON.stringify(db, null, 2));
-  } catch (err) {
-    errorCount++;
-  }
+  fs.writeFileSync(FILE, JSON.stringify(db, null, 2));
 }
 
-// ================= OWNER =================
 const OWNER_ID = "1497177808211017728";
 
-function isOwner(id, guild) {
-  return id === OWNER_ID || (guild && id === guild.ownerId);
+function isOwner(id) {
+  return id === OWNER_ID || db.allowed.includes(id);
 }
 
 // ================= BACKUP =================
 function createBackup(guild) {
   const data = {
-    id: Date.now(),
+    id: db.backups.length + 1,
     name: guild.name,
-
     channels: guild.channels.cache.map(c => ({
       name: c.name,
       type: c.type,
-      parent: c.parent ? c.parent.name : null,
-      position: c.position
+      parent: c.parent ? c.parent.name : null
     })),
-
     createdAt: Date.now()
   };
 
-  db.backups = [data];
+  db.backups.push(data);
   save();
-
-  totalBackupsCount++;
   return data;
 }
 
@@ -115,49 +84,115 @@ client.once('ready', () => {
 
 // ================= COMMANDS =================
 client.on('messageCreate', async (msg) => {
-  try {
-    if (!msg.guild || msg.author.bot) return;
-    if (!isOwner(msg.author.id, msg.guild)) return;
+  if (!msg.guild || msg.author.bot) return;
+  if (!isOwner(msg.author.id)) return;
 
-    const args = msg.content.split(' ');
-    const cmd = args[0].toLowerCase();
+  const args = msg.content.split(' ');
+  const cmd = args[0].toLowerCase();
 
-    // BACKUP
-    if (cmd === 'backup') {
-      createBackup(msg.guild);
-      return msg.reply("Backup saved successfully.");
+  // ================= BACKUP =================
+  if (cmd === 'backup') {
+    const b = createBackup(msg.guild);
+    return msg.reply(`Backup saved #${b.id}`);
+  }
+
+  // ================= SETUP (latest restore) =================
+  if (cmd === 'setup') {
+    const b = db.backups.at(-1);
+    if (!b) return msg.reply("No backup found");
+
+    await restore(msg.guild, b);
+    return msg.reply("Latest backup restored");
+  }
+
+  // ================= RESTORE BY ID =================
+  if (cmd === 'restore') {
+    const id = parseInt(args[1]);
+    const b = db.backups.find(x => x.id === id);
+
+    if (!b) return msg.reply("Backup not found");
+
+    await restore(msg.guild, b);
+    return msg.reply(`Restored backup #${id}`);
+  }
+
+  // ================= PREVIEW =================
+  if (cmd === 'preview') {
+    const b = db.backups.at(-1);
+    if (!b) return msg.reply("No backups");
+
+    return msg.reply(
+      `Backup #${b.id}\nChannels: ${b.channels.length}`
+    );
+  }
+
+  // ================= HISTORY =================
+  if (cmd === 'history') {
+    return msg.reply(`Total backups: ${db.backups.length}`);
+  }
+
+  // ================= COMPARE =================
+  if (cmd === 'compare') {
+    const a = db.backups.find(x => x.id === parseInt(args[1]));
+    const b = db.backups.find(x => x.id === parseInt(args[2]));
+
+    if (!a || !b) return msg.reply("Invalid backups");
+
+    return msg.reply(
+      `A: ${a.channels.length} channels\nB: ${b.channels.length} channels`
+    );
+  }
+
+  // ================= ADD USER =================
+  if (cmd === 'faddbackup') {
+    const user = msg.mentions.users.first();
+    if (!user) return msg.reply("Mention user");
+
+    if (!db.allowed.includes(user.id)) {
+      db.allowed.push(user.id);
+      save();
     }
 
-    // CHECK
-    if (cmd === 'check') {
-      const last = db.backups.at(-1);
-      if (!last) return msg.reply("No backups found.");
+    return msg.reply("User added");
+  }
 
-      return msg.reply(`Latest Backup: ${last.name}`);
-    }
+  // ================= REMOVE USER =================
+  if (cmd === 'fremovebackup') {
+    const user = msg.mentions.users.first();
+    if (!user) return msg.reply("Mention user");
 
-    // RESTORE
-    if (cmd === 'restore') {
-      const backup = db.backups.at(-1);
-      if (!backup) return msg.reply("No backup found.");
+    db.allowed = db.allowed.filter(x => x !== user.id);
+    save();
 
-      await restore(msg.guild, backup);
-      return msg.reply("Backup restored successfully.");
-    }
+    return msg.reply("User removed");
+  }
 
-    // STATS
-    if (cmd === 'stats') {
-      return msg.reply(
-        `Backups: ${db.backups.length}\nErrors: ${errorCount}`
-      );
-    }
+  // ================= LOAD (no delete restore) =================
+  if (cmd === 'load') {
+    const b = db.backups.at(-1);
+    if (!b) return msg.reply("No backup");
 
-  } catch (err) {
-    errorCount++;
-    console.log(err);
-    return msg.reply("An internal error occurred.");
+    await restore(msg.guild, b);
+    return msg.reply("Loaded without deleting existing channels");
+  }
+
+  // ================= KRBACK (clear backups) =================
+  if (cmd === 'krback') {
+    db.backups = [];
+    save();
+    return msg.reply("All backups deleted");
+  }
+
+  // ================= STATS =================
+  if (cmd === 'stats') {
+    const guild = msg.guild;
+
+    const missing = guild.channels.cache.size;
+
+    return msg.reply(
+      `Owner: ${OWNER_ID}\nChannels: ${guild.channels.cache.size}\nBackups: ${db.backups.length}`
+    );
   }
 });
 
-// ================= LOGIN =================
 client.login(process.env.TOKEN);
