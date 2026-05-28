@@ -131,7 +131,7 @@ client.on('messageCreate', async (msg) => {
   if (cmd === 'backup') {
     const type = args[1] || "all";
     const b = createBackup(msg.guild, type);
-    return msg.reply(`✅ Backup #${b.id} saved (${type})`);
+    return msg.channel.send(`✅ Backup #${b.id} saved (${type})`);
   }
 
   // ================= LOAD =================
@@ -139,11 +139,11 @@ client.on('messageCreate', async (msg) => {
     const type = args[1] || "all";
     const b = db.backups.at(-1);
 
-    if (!b) return msg.reply("❌ No backup found.");
+    if (!b) return msg.channel.send("❌ No backup found.");
 
-    await msg.reply(`⏳ Loading backup #${b.id} (${type})...`);
+    await msg.channel.send(`⏳ Loading backup #${b.id} (${type})...`);
     await restore(msg.guild, b, type);
-    return msg.reply(`✅ Backup #${b.id} loaded successfully (${type}).`);
+    return msg.channel.send(`✅ Backup #${b.id} loaded successfully (${type}).`);
   }
 
   // ================= SETUP =================
@@ -151,26 +151,26 @@ client.on('messageCreate', async (msg) => {
     const id = parseInt(args[1]);
     const b = id ? db.backups.find(x => x.id === id) : db.backups.at(-1);
 
-    if (!b) return msg.reply("❌ No backup found.");
+    if (!b) return msg.channel.send("❌ No backup found.");
 
-    await msg.reply(`⏳ Setting up backup #${b.id}...`);
+    await msg.channel.send(`⏳ Setting up backup #${b.id}...`);
     await restore(msg.guild, b, "all");
-    return msg.reply(`✅ Backup #${b.id} fully restored.`);
+    return msg.channel.send(`✅ Backup #${b.id} fully restored.`);
   }
 
   // ================= PREVIEW =================
   if (cmd === 'preview') {
     const b = db.backups.at(-1);
-    if (!b) return msg.reply("❌ No backups found.");
+    if (!b) return msg.channel.send("❌ No backups found.");
 
-    return msg.reply(
+    return msg.channel.send(
       `📦 Backup #${b.id}\nChannels: ${b.channels.length}\nRoles: ${b.roles.length}`
     );
   }
 
   // ================= HISTORY =================
   if (cmd === 'history') {
-    return msg.reply(`📋 Total backups: ${db.backups.length}`);
+    return msg.channel.send(`📋 Total backups: ${db.backups.length}`);
   }
 
   // ================= COMPARE =================
@@ -178,9 +178,9 @@ client.on('messageCreate', async (msg) => {
     const a = db.backups.find(x => x.id === parseInt(args[1]));
     const b = db.backups.find(x => x.id === parseInt(args[2]));
 
-    if (!a || !b) return msg.reply("❌ Invalid backup IDs.");
+    if (!a || !b) return msg.channel.send("❌ Invalid backup IDs.");
 
-    return msg.reply(
+    return msg.channel.send(
       `🔍 Backup #${a.id}: ${a.channels.length} channels | ${a.roles.length} roles\n` +
       `🔍 Backup #${b.id}: ${b.channels.length} channels | ${b.roles.length} roles`
     );
@@ -189,28 +189,28 @@ client.on('messageCreate', async (msg) => {
   // ================= ADD =================
   if (cmd === 'faddbackup') {
     const user = msg.mentions.users.first();
-    if (!user) return msg.reply("❌ Mention a user.");
+    if (!user) return msg.channel.send("❌ Mention a user.");
 
     if (!db.allowed.includes(user.id)) db.allowed.push(user.id);
     save();
-    return msg.reply(`✅ <@${user.id}> added to allowed users.`);
+    return msg.channel.send(`✅ <@${user.id}> added to allowed users.`);
   }
 
   // ================= REMOVE =================
   if (cmd === 'fremovebackup') {
     const user = msg.mentions.users.first();
-    if (!user) return msg.reply("❌ Mention a user.");
+    if (!user) return msg.channel.send("❌ Mention a user.");
 
     db.allowed = db.allowed.filter(x => x !== user.id);
     save();
-    return msg.reply(`✅ <@${user.id}> removed from allowed users.`);
+    return msg.channel.send(`✅ <@${user.id}> removed from allowed users.`);
   }
 
   // ================= KRBACK =================
   if (cmd === 'krback') {
     db.backups = [];
     save();
-    return msg.reply("🗑️ All backups cleared.");
+    return msg.channel.send("🗑️ All backups cleared.");
   }
 
   // ================= STATS =================
@@ -232,7 +232,7 @@ client.on('messageCreate', async (msg) => {
       .setFooter({ text: `Server: ${guild.name}` })
       .setTimestamp();
 
-    return msg.reply({ embeds: [embed] });
+    return msg.channel.send({ embeds: [embed] });
   }
 
 });
